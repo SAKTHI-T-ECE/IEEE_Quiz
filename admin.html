@@ -1,0 +1,29 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Quiz host</title><link rel="stylesheet" href="style.css"></head><body><div class="card">
+<h1>Host panel</h1><p class="sub">Keep this tab open during the quiz. It runs the timer and scoring.</p>
+<input id="key" placeholder="Answer key, e.g. abbcd... (one letter per question)"><p class="sub" id="cnt">0 joined</p><p id="st" class="sub">Lobby open.</p>
+<button class="btn" id="start">Start quiz</button><br><br><button class="btn alt" id="reset">Reset lobby (kick everyone)</button><p class="err" id="er"></p><div id="lb"></div></div>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script><script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-database-compat.js"></script><script src="config.js"></script>
+<script>
+firebase.initializeApp(firebaseConfig);const db=firebase.database();
+let Q,P={},A={},off=0;const sleep=ms=>new Promise(r=>setTimeout(r,ms)),now=()=>Date.now()+off;
+fetch('questions.json').then(r=>r.json()).then(q=>Q=q);
+db.ref('.info/serverTimeOffset').on('value',x=>off=x.val()||0);
+db.ref('players').on('value',x=>{P=x.val()||{};cnt.textContent=Object.keys(P).length+' joined'});
+const idx=c=>'abcd'.indexOf(c),allIn=()=>{const l=Object.entries(P).filter(([k,v])=>v.endedAt===undefined);return l.length&&l.every(([k])=>A[k])};
+async function lobby(){await Promise.all(['players','answers','times','board'].map(n=>db.ref(n).remove()));await db.ref('state').set({phase:'lobby'});st.textContent='Lobby open.';lb.innerHTML=''}
+reset.onclick=lobby;lobby();
+start.onclick=async()=>{const k=key.value.trim().toLowerCase();
+ if(k.length!==Q.length||/[^abcd]/.test(k))return er.textContent='Answer key needs '+Q.length+' letters (a-d).';
+ if(!Object.keys(P).length)return er.textContent='No players yet.';er.textContent='';start.disabled=true;
+ for(let i=0;i<Q.length;i++){const e=now()+60000;st.textContent='Question '+(i+1)+' of '+Q.length+' is live.';
+  await db.ref('times/'+i).set({s:e-60000,e});await db.ref('state').set({phase:'q',i,endsAt:e});
+  const r=db.ref('answers/'+i);A={};r.on('value',x=>A=x.val()||{});
+  while(now()<e&&!allIn())await sleep(300);r.off();
+  await db.ref('state').set({phase:'reveal',i,endsAt:e,a:idx(k[i])});await sleep(3000)}
+ const [p,a,t]=await Promise.all(['players','answers','times'].map(n=>db.ref(n).once('value').then(x=>x.val()||{})));
+ const B=Object.entries(p).map(([n,v])=>{let sc=0,tm=0;const end=v.endedAt===undefined?99:v.endedAt;
+  for(let i=0;i<Q.length;i++){const r=a[i]&&a[i][n];if(!r||i>end||!t[i]||r.t>t[i].e+500)continue;if(r.c===idx(k[i])){sc++;tm+=Math.max(0,r.t-t[i].s)}}
+  return{name:v.name,score:sc,time:+(tm/1000).toFixed(1),left:v.endedAt!==undefined}}).sort((x,y)=>y.score-x.score||x.time-y.time);
+ await db.ref('board').set(B);await db.ref('state').set({phase:'done'});st.textContent='Quiz finished.';start.disabled=false;
+ lb.innerHTML='<table><tr><th>#</th><th>Name</th><th>Score</th><th>Time</th></tr>'+B.map((p,i)=>`<tr><td>${i+1}</td><td>${p.name.replace(/</g,'&lt;')}${p.left?' (left early)':''}</td><td>${p.score}</td><td>${p.time}s</td></tr>`).join('')+'</table>'};
+</script></body></html>

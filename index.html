@@ -1,0 +1,38 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>IEEE Quiz</title><link rel="stylesheet" href="style.css"></head><body><main id="app" style="width:100%;display:grid;place-items:center"></main>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script><script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-database-compat.js"></script><script src="config.js"></script>
+<script>
+firebase.initializeApp(firebaseConfig);const db=firebase.database(),$=document.getElementById('app');
+let me='',key='',closed=false,live=false,off=0,iv,sel=-1,W,H,cur=-1,st={};
+const QP=fetch('questions.json').then(r=>r.json());
+db.ref('.info/serverTimeOffset').on('value',x=>off=x.val()||0);
+const K=n=>n.toLowerCase().replace(/[.$#\[\]\/]/g,'_'),esc=t=>String(t).replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+const show=h=>$.innerHTML='<div class="card">'+h+'</div>';
+function home(m=''){show(`<h1>IEEE Quiz</h1><p class="sub">Enter your name to join.</p><input id="nm" maxlength="20" placeholder="Your name"><button class="btn" id="go">Join quiz</button><p class="err">${m}</p>`);
+ go.onclick=async()=>{const n=nm.value.trim();if(!n)return home('Enter your name to join.');
+  if(st.phase&&st.phase!=='lobby')return home('The quiz has already started.');
+  const r=await db.ref('players/'+K(n)).transaction(v=>v?undefined:{name:n});
+  if(!r.committed)return home('That name is taken. Try another.');me=n;key=K(n);wait()}}
+function wait(){show(`<h1>You're in, ${esc(me)}</h1><p>Waiting for the host to start.</p><p class="badtxt">Once the quiz starts, pressing back, switching tabs or opening another window ends your session. Your score so far becomes final.</p>`)}
+db.ref('state').on('value',x=>{st=x.val()||{};onState()});
+async function onState(){if(!me||closed)return;const Q=await QP;
+ if(st.phase==='q'&&st.i!==cur){cur=st.i;question(Q[cur])}
+ else if(st.phase==='reveal')reveal();else if(st.phase==='done')done();
+ else if(st.phase==='lobby'&&live)location.reload()}
+function question(q){
+ if(!live){live=true;W=innerWidth;H=innerHeight;history.pushState(0,'',location.href)}
+ db.ref('players/'+key+'/endedAt').onDisconnect().set(cur);sel=-1;const end=st.endsAt;
+ show(`<div class="meta"><span>Q ${cur+1}</span><span id="t">60</span></div><div class="bar"><i id="b"></i></div><h2>${esc(q.q)}</h2><div class="opts">${q.o.map((o,k)=>`<button class="opt" data-k="${k}"><b>${'ABCD'[k]}</b> ${esc(o)}</button>`).join('')}</div>`);
+ $.querySelectorAll('.opt').forEach(x=>x.onclick=()=>{if(sel>=0)return;sel=+x.dataset.k;x.classList.add('sel');
+  db.ref('answers/'+cur+'/'+key).set({c:sel,t:firebase.database.ServerValue.TIMESTAMP})});
+ clearInterval(iv);iv=setInterval(()=>{const l=Math.max(0,(end-(Date.now()+off))/1000);t.textContent=Math.ceil(l);b.style.width=l/60*100+'%';if(l<10)b.classList.add('low')},100)}
+function reveal(){clearInterval(iv);$.querySelectorAll('.opt').forEach((x,k)=>{x.disabled=true;if(k===st.a)x.classList.add('ok');else if(k===sel)x.classList.add('bad')})}
+async function done(){if(!live)return;live=false;clearInterval(iv);db.ref('players/'+key+'/endedAt').onDisconnect().cancel();
+ const B=(await db.ref('board').once('value')).val()||[];
+ show(`<h1>Leaderboard</h1><table><tr><th>#</th><th>Name</th><th>Score</th><th>Time</th></tr>${B.map((p,i)=>`<tr class="${p.name===me?'me':''}"><td>${i+1}</td><td>${esc(p.name)}${p.left?' (left early)':''}</td><td>${p.score}</td><td>${p.time}s</td></tr>`).join('')}</table>`)}
+function cheat(){if(!live||closed)return;closed=true;clearInterval(iv);db.ref('players/'+key+'/endedAt').set(cur);
+ show(`<h1 class="badtxt">Session closed</h1><p>You left the quiz screen, so your session ended. Your answers so far are your final score.</p>`)}
+document.addEventListener('visibilitychange',()=>document.hidden&&cheat());
+addEventListener('blur',cheat);addEventListener('pagehide',cheat);addEventListener('popstate',cheat);
+addEventListener('resize',()=>{if(live&&(innerWidth<W*.85||innerHeight<H*.75))cheat()});
+home();
+</script></body></html>
